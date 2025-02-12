@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Web-Based Face Detection</title>
+    <style>
+        body {
+            text-align: center;
+            font-family: Arial, sans-serif;
+        }
+        video {
+            width: 90%;
+            max-width: 600px;
+            border: 2px solid black;
+            margin-top: 10px;
+        }
+        canvas {
+            display: none;
+        }
+        button {
+            padding: 10px;
+            font-size: 18px;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Web-Based Face Detection</h1>
+    <button id="start-camera">Start Camera</button>
+    <br>
+    <video id="video" autoplay playsinline></video>
+    <canvas id="canvas"></canvas>
+
+    <script>
+        let video = document.getElementById("video");
+        let startButton = document.getElementById("start-camera");
+
+        // Function to start the camera
+        async function startCamera() {
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                alert("❌ Camera access is NOT supported on this browser. Use Chrome or Safari.");
+                return;
+            }
+
+            try {
+                let stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: "user" }  // Change "environment" for back camera
+                });
+                video.srcObject = stream;
+            } catch (error) {
+                console.error("Error accessing camera:", error);
+                alert("❌ Camera permission is required. Please allow access.");
+            }
+        }
+
+        // Start camera on button click
+        startButton.addEventListener("click", startCamera);
+    </script>
+</body>
+</html>
