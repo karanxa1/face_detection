@@ -1,42 +1,76 @@
-from flask import Flask, render_template, request, Response
+from flask import Flask, render_template, request, Response, jsonify, send_from_directory
+from flask_cors import CORS
 import cv2
 import numpy as np
-from PIL import Image
-import io
+import os
 
 app = Flask(__name__)
+CORS(app)
 
-# Load OpenCV's face detection model
-face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+# Upload folder setup
+UPLOAD_FOLDER = 'static'
+if not os.path.exists(UPLOAD_FOLDER):
+    os.makedirs(UPLOAD_FOLDER)
+
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+
+# Initialize HOG descriptor for human detection
+hog = cv2.HOGDescriptor()
+hog.setSVMDetector(cv2.HOGDescriptor_getDefaultPeopleDetector())
+
+# Global variable for processed video path
+processed_video_path = None
 
 @app.route('/')
 def index():
     return render_template('index.html')
 
-@app.route('/upload_frame', methods=['POST'])
-def upload_frame():
-    if 'frame' not in request.files:
-        return "No frame received", 400
+@app.route('/upload_video', methods=['POST'])
+def upload_video():
+    """Handles video upload and saves it."""
+    global processed_video_path
 
-    file = request.files['frame'].read()
-    np_img = np.frombuffer(file, np.uint8)
-    frame = cv2.imdecode(np_img, cv2.IMREAD_COLOR)
+    if 'video' not in request.files:
+        return jsonify({'error': 'No video file received'}), 400
 
-    # Convert to grayscale for face detection
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    file = request.files['video']
+    filename = os.path.join(app.config['UPLOAD_FOLDER'], 'uploaded_video.mp4')
+    file.save(filename)
 
-    # Detect faces
-    faces = face_cascade.detectMultiScale(gray, scaleFactor=1.3, minNeighbors=5, minSize=(30, 30))
+    processed_video_path = os.path.join(app.config['UPLOAD_FOLDER'], 'processed_video.mp4')
 
-    # Draw rectangles around detected faces
-    for (x, y, w, h) in faces:
-        cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+    # Start video processing
+    process_video(filename, processed_video_path)
 
-    # Convert processed frame to JPEG
-    _, buffer = cv2.imencode('.jpg', frame)
-    frame_bytes = buffer.tobytes()
+    return jsonify({'message': 'Video uploaded successfully', 'processed_video': '/processed_video'})
 
-    return Response(frame_bytes, mimetype='image/jpeg')
+@app.route('/processed_video')
+def get_processed_video():
+    """Serves the processed video."""
+    return send_from_directory(app.config['UPLOAD_FOLDER'], 'processed_video.mp4')
+
+def process_video(input_path, output_path):
+    """Processes video for human detection and saves it with H.264 encoding."""
+    cap = cv2.VideoCapture(input_path)
+    fourcc = cv2.VideoWriter_fourcc(*'avc1')  # H.264 Encoding
+    out = cv2.VideoWriter(output_path, fourcc, 20.0, (int(cap.get(3)), int(cap.get(4))))
+
+    while cap.isOpened():
+        ret, frame = cap.read()
+        if not ret:
+            break
+
+        # Detect humans in the frame
+        boxes, _ = hog.detectMultiScale(frame, winStride=(4, 4), padding=(8, 8), scale=1.05)
+
+        # Draw bounding boxes for detected humans
+        for (x, y, w, h) in boxes:
+            cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+
+        out.write(frame)
+
+    cap.release()
+    out.release()
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)
