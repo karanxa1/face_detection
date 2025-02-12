@@ -7,19 +7,14 @@ import os
 app = Flask(__name__)
 CORS(app)
 
-# Upload folder setup
-UPLOAD_FOLDER = 'static'
-if not os.path.exists(UPLOAD_FOLDER):
-    os.makedirs(UPLOAD_FOLDER)
+UPLOAD_FOLDER = 'static/'
+PROCESSED_FOLDER = 'processed_videos/'
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+os.makedirs(PROCESSED_FOLDER, exist_ok=True)
 
-app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
-
-# Initialize HOG descriptor for human detection
+# Load pre-trained human detection model
 hog = cv2.HOGDescriptor()
 hog.setSVMDetector(cv2.HOGDescriptor_getDefaultPeopleDetector())
-
-# Global variable for processed video path
-processed_video_path = None
 
 @app.route('/')
 def index():
@@ -27,43 +22,41 @@ def index():
 
 @app.route('/upload_video', methods=['POST'])
 def upload_video():
-    """Handles video upload and saves it."""
-    global processed_video_path
-
+    """Handles video upload and starts processing"""
     if 'video' not in request.files:
-        return jsonify({'error': 'No video file received'}), 400
+        return jsonify({'error': 'No file uploaded'}), 400
 
     file = request.files['video']
-    filename = os.path.join(app.config['UPLOAD_FOLDER'], 'uploaded_video.mp4')
+    filename = os.path.join(UPLOAD_FOLDER, file.filename)
     file.save(filename)
 
-    processed_video_path = os.path.join(app.config['UPLOAD_FOLDER'], 'processed_video.mp4')
+    output_filename = os.path.join(PROCESSED_FOLDER, "processed_" + file.filename)
+    process_video(filename, output_filename)
 
-    # Start video processing
-    process_video(filename, processed_video_path)
-
-    return jsonify({'message': 'Video uploaded successfully', 'processed_video': '/processed_video'})
-
-@app.route('/processed_video')
-def get_processed_video():
-    """Serves the processed video."""
-    return send_from_directory(app.config['UPLOAD_FOLDER'], 'processed_video.mp4')
+    return jsonify({'processed_video': output_filename})
 
 def process_video(input_path, output_path):
-    """Processes video for human detection and saves it with H.264 encoding."""
+    """Human detection on uploaded videos with proper encoding"""
     cap = cv2.VideoCapture(input_path)
-    fourcc = cv2.VideoWriter_fourcc(*'avc1')  # H.264 Encoding
-    out = cv2.VideoWriter(output_path, fourcc, 20.0, (int(cap.get(3)), int(cap.get(4))))
+    fourcc = cv2.VideoWriter_fourcc(*'avc1')  # H.264 encoding
+    fps = int(cap.get(cv2.CAP_PROP_FPS))
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+    out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
 
     while cap.isOpened():
         ret, frame = cap.read()
         if not ret:
             break
 
-        # Detect humans in the frame
-        boxes, _ = hog.detectMultiScale(frame, winStride=(4, 4), padding=(8, 8), scale=1.05)
+        # Convert frame to grayscale
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-        # Draw bounding boxes for detected humans
+        # Detect humans
+        boxes, _ = hog.detectMultiScale(gray, winStride=(8,8), padding=(8,8), scale=1.05)
+
+        # Draw rectangles around detected humans
         for (x, y, w, h) in boxes:
             cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
 
@@ -71,6 +64,41 @@ def process_video(input_path, output_path):
 
     cap.release()
     out.release()
+
+@app.route('/video_feed')
+def video_feed():
+    """Live webcam video feed"""
+    return Response(generate_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
+
+def generate_frames():
+    """Human detection in live webcam mode"""
+    cap = cv2.VideoCapture(0)
+
+    while True:
+        success, frame = cap.read()
+        if not success:
+            break
+
+        # Convert frame to grayscale
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+
+        # Detect humans
+        boxes, _ = hog.detectMultiScale(gray, winStride=(8,8), padding=(8,8), scale=1.05)
+
+        # Draw rectangles around detected humans
+        for (x, y, w, h) in boxes:
+            cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+
+        _, buffer = cv2.imencode('.jpg', frame)
+        frame_bytes = buffer.tobytes()
+        
+        yield (b'--frame\r\n'
+               b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+
+@app.route('/processed_videos/<filename>')
+def processed_videos(filename):
+    """Serve processed videos"""
+    return send_from_directory(PROCESSED_FOLDER, filename)
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)

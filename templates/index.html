@@ -5,146 +5,66 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Human Detection App</title>
     <style>
-        body {
-            text-align: center;
-            font-family: Arial, sans-serif;
-            background-color: #f4f4f9;
-            margin: 0;
-            padding: 20px;
-        }
-
-        .container {
-            background: white;
-            padding: 20px;
-            border-radius: 12px;
-            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
-            max-width: 800px;
-            margin: auto;
-        }
-
-        .tabs {
-            display: flex;
-            justify-content: center;
-            margin-bottom: 20px;
-            gap: 10px;
-        }
-
-        .tab {
-            padding: 10px 20px;
-            cursor: pointer;
-            border: none;
-            background: none;
-            font-size: 16px;
-            color: #666;
-            border-bottom: 2px solid transparent;
-        }
-
-        .tab.active {
-            color: #007bff;
-            border-bottom: 2px solid #007bff;
-        }
-
-        .tab-content {
-            display: none;
-        }
-
-        .tab-content.active {
-            display: block;
-        }
-
-        video {
-            width: 100%;
-            max-height: 400px;
-            background: black;
-        }
-
-        button {
-            padding: 10px 20px;
-            font-size: 16px;
-            background-color: #007bff;
-            color: white;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-            margin: 10px;
-        }
-
-        button:hover {
-            background-color: #0056b3;
-        }
+        body { text-align: center; font-family: Arial, sans-serif; background-color: #f4f4f9; }
+        .container { background: white; padding: 20px; border-radius: 10px; box-shadow: 0px 4px 8px rgba(0,0,0,0.1); width: 80%; margin: auto; }
+        video, img { width: 100%; border-radius: 8px; }
+        button { padding: 10px; font-size: 16px; margin: 10px; cursor: pointer; border: none; border-radius: 5px; background: #007bff; color: white; }
+        button:hover { background: #0056b3; }
     </style>
 </head>
 <body>
+
     <div class="container">
         <h1>Human Detection App</h1>
 
-        <div class="tabs">
-            <button class="tab active" data-tab="camera">Live Camera</button>
-            <button class="tab" data-tab="upload">Video Upload</button>
+        <div>
+            <button onclick="startWebcam()">Start Camera</button>
+            <button onclick="stopWebcam()">Stop Camera</button>
         </div>
 
-        <div id="camera-tab" class="tab-content active">
-            <button id="start-camera">Start Camera</button>
-            <button id="stop-camera" style="display: none;">Stop Camera</button>
-            <div>
-                <img id="camera-stream" style="width: 100%;" />
-            </div>
-        </div>
+        <img id="video-feed" src="{{ url_for('video_feed') }}" alt="Live Video Stream">
 
-        <div id="upload-tab" class="tab-content">
-            <input type="file" id="video-upload" accept="video/*">
-            <button id="process-video">Process Video</button>
+        <h2>Upload Video</h2>
+        <input type="file" id="video-upload" accept="video/*">
+        <button onclick="uploadVideo()">Process Video</button>
 
-            <h3>Processed Video</h3>
-            <video id="processed-video" controls></video>
-        </div>
+        <h2>Processed Video</h2>
+        <video id="processed-video" controls></video>
     </div>
 
     <script>
-        document.querySelectorAll('.tab').forEach(tab => {
-            tab.addEventListener('click', () => {
-                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-                tab.classList.add('active');
+        let videoFeed = document.getElementById("video-feed");
+        let processedVideo = document.getElementById("processed-video");
+        let stream = null;
 
-                document.querySelectorAll('.tab-content').forEach(content => {
-                    content.classList.remove('active');
-                });
-                document.getElementById(tab.dataset.tab + '-tab').classList.add('active');
-            });
-        });
+        function startWebcam() {
+            videoFeed.src = "{{ url_for('video_feed') }}";
+        }
 
-        let cameraStream = null;
-        document.getElementById("start-camera").addEventListener("click", function() {
-            document.getElementById("camera-stream").src = "/video_feed";
-            document.getElementById("start-camera").style.display = "none";
-            document.getElementById("stop-camera").style.display = "inline-block";
-        });
+        function stopWebcam() {
+            videoFeed.src = "";
+        }
 
-        document.getElementById("stop-camera").addEventListener("click", function() {
-            document.getElementById("camera-stream").src = "";
-            document.getElementById("start-camera").style.display = "inline-block";
-            document.getElementById("stop-camera").style.display = "none";
-        });
-
-        document.getElementById("process-video").addEventListener("click", async function() {
-            let videoFile = document.getElementById("video-upload").files[0];
-            if (!videoFile) {
-                alert("Please upload a video first!");
+        async function uploadVideo() {
+            let fileInput = document.getElementById("video-upload");
+            if (!fileInput.files.length) {
+                alert("Please select a video file.");
                 return;
             }
 
             let formData = new FormData();
-            formData.append("video", videoFile);
+            formData.append("video", fileInput.files[0]);
 
-            let response = await fetch("/process_video", { method: "POST", body: formData });
-            let result = await response.json();
+            let response = await fetch("/upload_video", { method: "POST", body: formData });
+            let data = await response.json();
 
-            if (result.video_url) {
-                document.getElementById("processed-video").src = result.video_url;
+            if (data.processed_video) {
+                processedVideo.src = "/" + data.processed_video;
             } else {
-                alert("Error processing video!");
+                alert("Video processing failed.");
             }
-        });
+        }
     </script>
+
 </body>
 </html>
