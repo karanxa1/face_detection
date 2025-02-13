@@ -1,60 +1,70 @@
-from flask import Flask, render_template, request, Response, jsonify, url_for
-from flask_cors import CORS
+from flask import Flask, render_template, request, Response, jsonify, send_from_directory
 import cv2
-import numpy as np
 import os
+import numpy as np
 
 app = Flask(__name__)
-CORS(app)
+UPLOAD_FOLDER = "static"
+if not os.path.exists(UPLOAD_FOLDER):
+    os.makedirs(UPLOAD_FOLDER)
 
-# Global variable for webcam stream
-camera_stream = None
+# Load YOLO model for human detection
+net = cv2.dnn.readNet("yolov3.weights", "yolov3.cfg")
+layer_names = net.getLayerNames()
+output_layers = [layer_names[i - 1] for i in net.getUnconnectedOutLayers()]
 
-# Human Detection Model (HOG + SVM)
-hog = cv2.HOGDescriptor()
-hog.setSVMDetector(cv2.HOGDescriptor_getDefaultPeopleDetector())
-
-@app.route('/')
+@app.route("/")
 def index():
-    return render_template('index.html')
+    return render_template("index.html")
 
-# 🔹 Start Webcam Feed
-def generate_frames():
-    global camera_stream
+@app.route("/process_video", methods=["POST"])
+def process_video():
+    if "video" not in request.files:
+        return jsonify({"error": "No video uploaded"}), 400
 
-    if camera_stream is None or not camera_stream.isOpened():
-        camera_stream = cv2.VideoCapture(0)
+    file = request.files["video"]
+    file_path = os.path.join(UPLOAD_FOLDER, file.filename)
+    output_path = os.path.join(UPLOAD_FOLDER, "processed_" + file.filename)
+    file.save(file_path)
 
-    while True:
-        success, frame = camera_stream.read()
-        if not success:
+    detect_humans(file_path, output_path)
+    return jsonify({"processed_video": f"/static/processed_{file.filename}"}), 200
+
+def detect_humans(input_video, output_video):
+    cap = cv2.VideoCapture(input_video)
+    fourcc = cv2.VideoWriter_fourcc(*"avc1")  # H.264 codec
+    out = cv2.VideoWriter(output_video, fourcc, 20.0, (int(cap.get(3)), int(cap.get(4))))
+
+    while cap.isOpened():
+        ret, frame = cap.read()
+        if not ret:
             break
 
-        # Human Detection
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        boxes, _ = hog.detectMultiScale(gray, winStride=(8, 8), padding=(4, 4), scale=1.1)
+        height, width = frame.shape[:2]
+        blob = cv2.dnn.blobFromImage(frame, 0.00392, (416, 416), swapRB=True, crop=False)
+        net.setInput(blob)
+        detections = net.forward(output_layers)
 
-        for (x, y, w, h) in boxes:
-            cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+        for detection in detections:
+            for obj in detection:
+                scores = obj[5:]
+                class_id = np.argmax(scores)
+                confidence = scores[class_id]
 
-        ret, buffer = cv2.imencode('.jpg', frame)
-        frame_bytes = buffer.tobytes()
-        yield (b'--frame\r\n'
-               b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+                if class_id == 0 and confidence > 0.5:  # Class 0 = Human in COCO dataset
+                    center_x, center_y, w, h = map(int, obj[0:4] * np.array([width, height, width, height]))
+                    x = int(center_x - w / 2)
+                    y = int(center_y - h / 2)
+                    cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
 
-@app.route('/video_feed')
-def video_feed():
-    return Response(generate_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
+        out.write(frame)
 
-# 🔹 Stop Webcam
-@app.route('/stop_camera', methods=['POST'])
-def stop_camera():
-    global camera_stream
-    if camera_stream and camera_stream.isOpened():
-        camera_stream.release()
-        camera_stream = None
-    return jsonify({"message": "Camera stopped successfully"}), 200
+    cap.release()
+    out.release()
 
-# Run Flask
-if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5000)
+@app.route("/static/<filename>")
+def uploaded_file(filename):
+    return send_from_directory(UPLOAD_FOLDER, filename)
+
+if __name__ == "__main__":
+    app.
