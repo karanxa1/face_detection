@@ -15,61 +15,30 @@
 
     <h1>Human Detection System</h1>
 
-    <!-- 🔹 Tabs -->
-    <button class="tab" data-tab="webcam">Webcam Mode</button>
-    <button class="tab" data-tab="upload">Upload Video</button>
-
     <!-- 🔹 Webcam Mode -->
-    <div id="webcam-tab" class="tab-content">
+    <div id="webcam-tab">
         <h2>Live Webcam</h2>
         <img id="camera-feed" src="{{ url_for('video_feed') }}" alt="Webcam Feed">
         <br>
-        <button id="stop-camera">Stop Camera</button>
         <button id="start-camera">Start Camera</button>
-    </div>
-
-    <!-- 🔹 Upload Video Mode -->
-    <div id="upload-tab" class="tab-content" style="display: none;">
-        <h2>Upload Video</h2>
-        <input type="file" id="video-upload" accept="video/*">
-        <button id="process-video">Process Video</button>
-        <h3>Processed Video</h3>
-        <video id="processed-video" controls></video>
+        <button id="stop-camera">Stop Camera</button>
     </div>
 
 <script>
-    document.querySelectorAll('.tab').forEach(tab => {
-        tab.addEventListener('click', () => {
-            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-            tab.classList.add('active');
-            document.querySelectorAll('.tab-content').forEach(content => content.style.display = "none");
-            document.getElementById(tab.dataset.tab + '-tab').style.display = "block";
-        });
-    });
-
-    document.getElementById('stop-camera').addEventListener('click', () => {
-        fetch('/stop_camera', { method: 'POST' })
-            .then(response => response.json())
-            .then(data => console.log(data.message))
-            .catch(error => console.error('Error:', error));
-    });
-
+    // 🔹 Start Camera
     document.getElementById('start-camera').addEventListener('click', () => {
         document.getElementById('camera-feed').src = "{{ url_for('video_feed') }}" + "?t=" + new Date().getTime();
     });
 
-    document.getElementById('process-video').addEventListener('click', async () => {
-        const fileInput = document.getElementById('video-upload').files[0];
-        if (!fileInput) return alert("Please upload a video first.");
-
-        let formData = new FormData();
-        formData.append("video", fileInput);
-
-        let response = await fetch('/upload_video', { method: "POST", body: formData });
-        let data = await response.json();
-        if (data.processed_video) {
-            document.getElementById('processed-video').src = data.processed_video;
-        }
+    // 🔹 Stop Camera
+    document.getElementById('stop-camera').addEventListener('click', () => {
+        fetch('/stop_camera', { method: 'POST' })
+            .then(response => response.json())
+            .then(data => {
+                document.getElementById('camera-feed').src = "";
+                console.log(data.message);
+            })
+            .catch(error => console.error('Error:', error));
     });
 </script>
 
