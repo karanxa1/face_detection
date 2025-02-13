@@ -7,22 +7,60 @@ import os
 app = Flask(__name__)
 CORS(app)
 
-UPLOAD_FOLDER = 'static/'
-PROCESSED_FOLDER = 'processed_videos/'
+# Directories for video storage
+UPLOAD_FOLDER = 'static/uploads'
+PROCESSED_FOLDER = 'static/processed'
+
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(PROCESSED_FOLDER, exist_ok=True)
 
-# Load pre-trained human detection model
+# Load OpenCV pre-trained human detection model (HOG + SVM)
 hog = cv2.HOGDescriptor()
 hog.setSVMDetector(cv2.HOGDescriptor_getDefaultPeopleDetector())
+
+# Webcam Stream
+camera_stream = None
 
 @app.route('/')
 def index():
     return render_template('index.html')
 
+def generate_frames():
+    global camera_stream
+    camera_stream = cv2.VideoCapture(0)  # Open webcam
+
+    while camera_stream.isOpened():
+        success, frame = camera_stream.read()
+        if not success:
+            break
+
+        # Detect humans
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        boxes, _ = hog.detectMultiScale(gray, winStride=(4, 4), padding=(8, 8), scale=1.05)
+
+        # Draw bounding boxes
+        for (x, y, w, h) in boxes:
+            cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 3)
+
+        _, buffer = cv2.imencode('.jpg', frame)
+        frame_bytes = buffer.tobytes()
+
+        yield (b'--frame\r\n'
+               b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+
+@app.route('/video_feed')
+def video_feed():
+    return Response(generate_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
+
+@app.route('/stop_camera', methods=['POST'])
+def stop_camera():
+    global camera_stream
+    if camera_stream and camera_stream.isOpened():
+        camera_stream.release()
+    return jsonify({"message": "Camera stopped successfully"}), 200
+
 @app.route('/upload_video', methods=['POST'])
 def upload_video():
-    """Handles video upload and starts processing"""
     if 'video' not in request.files:
         return jsonify({'error': 'No file uploaded'}), 400
 
@@ -30,74 +68,36 @@ def upload_video():
     filename = os.path.join(UPLOAD_FOLDER, file.filename)
     file.save(filename)
 
-    output_filename = os.path.join(PROCESSED_FOLDER, "processed_" + file.filename)
-    process_video(filename, output_filename)
+    processed_filename = os.path.join(PROCESSED_FOLDER, 'processed_' + file.filename)
+    process_video(filename, processed_filename)
 
-    return jsonify({'processed_video': output_filename})
+    return jsonify({'processed_video': f"/static/processed/processed_{file.filename}"}), 200
 
 def process_video(input_path, output_path):
-    """Human detection on uploaded videos with proper encoding"""
     cap = cv2.VideoCapture(input_path)
-    fourcc = cv2.VideoWriter_fourcc(*'avc1')  # H.264 encoding
-    fps = int(cap.get(cv2.CAP_PROP_FPS))
-    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-
-    out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
+    fourcc = cv2.VideoWriter_fourcc(*'avc1')  # H.264 encoding for better compatibility
+    out = cv2.VideoWriter(output_path, fourcc, 20.0, (int(cap.get(3)), int(cap.get(4))))
 
     while cap.isOpened():
         ret, frame = cap.read()
         if not ret:
             break
 
-        # Convert frame to grayscale
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-
         # Detect humans
-        boxes, _ = hog.detectMultiScale(gray, winStride=(8,8), padding=(8,8), scale=1.05)
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        boxes, _ = hog.detectMultiScale(gray, winStride=(4, 4), padding=(8, 8), scale=1.05)
 
-        # Draw rectangles around detected humans
+        # Draw bounding boxes
         for (x, y, w, h) in boxes:
-            cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+            cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 3)
 
         out.write(frame)
 
     cap.release()
     out.release()
 
-@app.route('/video_feed')
-def video_feed():
-    """Live webcam video feed"""
-    return Response(generate_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
-
-def generate_frames():
-    """Human detection in live webcam mode"""
-    cap = cv2.VideoCapture(0)
-
-    while True:
-        success, frame = cap.read()
-        if not success:
-            break
-
-        # Convert frame to grayscale
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-
-        # Detect humans
-        boxes, _ = hog.detectMultiScale(gray, winStride=(8,8), padding=(8,8), scale=1.05)
-
-        # Draw rectangles around detected humans
-        for (x, y, w, h) in boxes:
-            cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
-
-        _, buffer = cv2.imencode('.jpg', frame)
-        frame_bytes = buffer.tobytes()
-        
-        yield (b'--frame\r\n'
-               b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
-
-@app.route('/processed_videos/<filename>')
-def processed_videos(filename):
-    """Serve processed videos"""
+@app.route('/static/processed/<filename>')
+def processed_video(filename):
     return send_from_directory(PROCESSED_FOLDER, filename)
 
 if __name__ == '__main__':
